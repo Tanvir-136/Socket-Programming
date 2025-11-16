@@ -29,10 +29,10 @@ try:
                     print("Received END signal. Transfer complete.")
                     break
                 
-                # 9. If it's file data, write it
+                # If it's file data, write it
                 f.write(data)
                 
-                # 10. Send the Acknowledgment (ACK)
+                # Send the Acknowledgment (ACK)
                 print(f"Received chunk ({len(data)} bytes). Sending ACK.")
                 conn.sendall(b"ACK")
                 
@@ -41,6 +41,5 @@ try:
 except socket.error as e:
     print(f"Socket error: {e}")
 finally:
-    # 11. Close the main server socket
     ser_soc.close()
     print("Server shut down.")

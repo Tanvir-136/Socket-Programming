@@ -1,13 +1,13 @@
 import socket
 import time
 
-# --- Configuration ---
+
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 7000
 FILENAME = "test.txt"
 CHUNK_SIZE = 100
-TIMEOUT = 3  # Timeout in seconds
-# ---------------------
+TIMEOUT = 3  
+
 
 # 1. Create a TCP/IP socket
 #    AF_INET = IPv4

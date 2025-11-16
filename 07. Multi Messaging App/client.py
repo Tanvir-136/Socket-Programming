@@ -1,92 +1,89 @@
-# Save this file as: client.py
-# this version is only for terminal base multi message application
 import socket
 import threading
-import sys
+import struct
 
 # --- Configuration ---
-# You must change this to the IP address of the computer
-# running the server.
-# If testing on your own machine, use '127.0.0.1' (localhost)
-SERVER_IP = '127.0.0.1'
-SERVER_PORT = 50000
+MCAST_GROUP = '224.1.1.1'  # A standard multicast "transient" address
+MCAST_PORT = 10000         # The port all members will use
+MESSAGE_BUFFER = 1024      # Buffer size for incoming messages
+# ---------------------
 
-# --- Functions ---
-
-def receive_messages(sock):
+def receiver(sock, username):
     """
-    This function runs in a separate thread
-    Its only job is to listen for messages from the server.
+    This function runs in a separate thread.
+    It loops forever, listening for multicast messages.
     """
     while True:
         try:
-            # Wait to receive data from the server
-            message = sock.recv(1024).decode('utf-8')
+            # Wait for a message
+            data, addr = sock.recvfrom(MESSAGE_BUFFER)
+            message = data.decode()
 
-            if not message:
-                # Server disconnected
-                print("\n[Disconnected from server. Press ENTER to exit.]")
-                break
+            
+            # \r moves cursor to start of line
+            # ' ' * 50 clears the line
+            # \r moves cursor back to start
+            print(f"\r{' ' * 50}\r", end="")
+            
+            # Print the received message
+            print(message)
 
-            # Print the message and re-draw the "You: " prompt
-            print(f"\n{message}")
-            print("You: ", end="", flush=True)
-
-        except Exception as e:
-            print(f"\n[Error receiving message: {e}]")
+            print(f"{username}: ", end="", flush=True)
+            
+        except socket.error:
+            # Socket was closed, thread can exit
             break
+        except Exception as e:
+            print(f"[RECEIVER ERROR] {e}")
 
-def start_client(username):
-    """
-    The main function to start the client.
-    """
-    # 1. Create the client socket (TCP)
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# --- Main Program Logic ---
+if __name__ == "__main__":
+    
+    # 1. Get a username
+    username = input("Enter your name: ")
+    
+    # 2. Create the multicast (UDP) socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    
+    # 3. Allow multiple sockets to bind to the same port
+    #    This is CRITICAL for multicast.
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    # 4. Bind to the server port
+    #    We bind to '' (all interfaces) and the multicast port
+    sock.bind(('', MCAST_PORT))
+    
+    # 5. Tell the OS to join the multicast group
+    #    We create a 'mreq' (multicast request) structure
+    mreq = struct.pack("4sl", socket.inet_aton(MCAST_GROUP), socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    
+    # 6. Set the Time-to-Live (TTL) for outgoing packets
+    #    1 = local network only
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
 
-    # 2. Try to connect to the server
-    try:
-        client.connect((SERVER_IP, SERVER_PORT))
-    except Exception as e:
-        print(f"[Error: Could not connect to {SERVER_IP}:{SERVER_PORT} - {e}]")
-        print("[Is the server running? Is the IP correct?]")
-        return
+    print(f"--- Joined multicast chat on {MCAST_GROUP}:{MCAST_PORT} ---")
 
-    print(f"[Connected to server as '{username}']")
+    # 7. Start the receiver thread
+    recv_thread = threading.Thread(target=receiver, args=(sock, username))
+    recv_thread.daemon = True # Thread will exit when main program exits
+    recv_thread.start()
 
-    # 3. Start the receiver thread
-    # This thread will just listen for incoming messages
-    receiver_thread = threading.Thread(target=receive_messages, args=(client,), daemon=True)
-    receiver_thread.start()
-
-    # 4. Start the sender loop (in the main thread)
-    # This loop waits for user input and sends it
-    print("Type 'exit' to quit.")
-
+    # 8. Start the sender loop (this runs in the main thread)
     try:
         while True:
-            # Wait for the user to type
-            print("You: ", end="", flush=True)
-            message = input()
-
-            if message.lower() == 'exit':
-                break
-
-            # Format the message and send it to the server
-            formatted_message = f"[{username}]: {message}"
-            client.send(formatted_message.encode('utf-8'))
-
-    except (EOFError, KeyboardInterrupt):
-        print("\n[Disconnecting...]")
+            # Wait for user to type a message
+            message = input(f"{username}: ")
+            
+            # Format the message with the username
+            full_message = f"{username}: {message}"
+            
+            # Send the message to the *entire multicast group*
+            sock.sendto(full_message.encode(), (MCAST_GROUP, MCAST_PORT))
+            
+    except KeyboardInterrupt:
+        print("\nLeaving chat...")
     finally:
-        # 5. Clean up
-        client.close()
-        print("[Disconnected from server]")
-
-if __name__ == "__main__":
-    try:
-        username = input("Enter your name: ")
-        if not username:
-            username = "Anonymous"
-    except (EOFError, KeyboardInterrupt):
-        sys.exit()
-    start_client(username)
+        # 9. Tell the OS to leave the multicast group
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, mreq)
+        sock.close()
